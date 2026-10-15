@@ -12,6 +12,8 @@
 .tc-map text { font-size: 11px; fill: #bbb; }
 
 .tc-edge { stroke: #555; stroke-width: 1.2; }
+.tc-bus { stroke: #8a8f98; stroke-width: 3; stroke-linecap: round; }
+.tc-packet { fill: #ffd2bd; filter: drop-shadow(0 0 4px #e07a4f); }
 .tc-flow { stroke-dasharray: 4 4; animation: tc-flow 0.8s linear infinite; }
 @keyframes tc-flow { to { stroke-dashoffset: -8; } }
 

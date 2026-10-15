@@ -13,6 +13,7 @@ Module.register("MMM-terminalClaude", {
 		maxActivity: 7, // activity nodes per busy session
 		maxSubagents: 4,
 		subagentActiveMs: 60 * 1000,
+		layout: "hybrid", // "hybrid" (bus of sessions, star per busy session) or "star"
 		mapWidth: 560,
 		mapHeight: 340,
 		fadeSpeed: 1000
@@ -106,10 +107,90 @@ Module.register("MMM-terminalClaude", {
 		const sig = JSON.stringify(sessions.map((s) => [s.id, s.status, s.activity.map((a) => [a.kind, a.target, a.tool, a.running, a.count]), s.subagents.map((a) => [a.id, a.current && a.current.target])]));
 		if (sig === this.mapSig) return;
 		this.mapSig = sig;
-		this.el.map.innerHTML = this.renderMap(sessions);
+		this.el.map.innerHTML = this.config.layout === "star" ? this.renderStar(sessions) : this.renderHybrid(sessions);
 	},
 
-	renderMap (sessions) {
+	isBusy (s) {
+		return s.status === "busy" || s.subagents.length > 0;
+	},
+
+	children (s) {
+		return [
+			...s.activity.map((a) => ({ ...a, sub: false })),
+			...s.subagents.map((a) => ({ sub: true, kind: "agent", tool: a.type, target: a.description || (a.current && a.current.target), running: true }))
+		];
+	},
+
+	// One activity/subagent node at (kx, ky), wired to its hub at (hx, hy); ka = angle from hub (label side)
+	kidNode (k, j, kx, ky, ka, hx, hy, edges, nodes) {
+		const col = this.KIND_COLORS[k.kind] || this.KIND_COLORS.other;
+		const op = k.running ? 1 : Math.max(0.35, 1 - j * 0.1);
+		edges.push(`<line class="tc-edge ${k.running ? "tc-flow" : ""}" style="stroke:${col};opacity:${op * 0.7}" x1="${hx}" y1="${hy}" x2="${kx}" y2="${ky}"/>`);
+		const anchor = Math.cos(ka) > 0.25 ? "start" : Math.cos(ka) < -0.25 ? "end" : "middle";
+		const dx = anchor === "start" ? 9 : anchor === "end" ? -9 : 0;
+		const dy = anchor === "middle" ? (Math.sin(ka) > 0 ? 18 : -10) : 4;
+		const shape = k.sub
+			? `<rect x="${kx - 5}" y="${ky - 5}" width="10" height="10" transform="rotate(45 ${kx} ${ky})" style="fill:${col}"/>`
+			: `<circle cx="${kx}" cy="${ky}" r="${4 + Math.min(k.count || 1, 4)}" style="fill:${col}"/>`;
+		const label = `${k.tool}${k.target ? ` · ${this.trunc(k.target, 18)}` : ""}${k.count > 1 ? ` ×${k.count}` : ""}`;
+		nodes.push(`<g class="tc-kid ${k.running ? "tc-running" : ""}" style="opacity:${op}">${k.running ? `<circle class="tc-ping" cx="${kx}" cy="${ky}" r="8" style="stroke:${col}"/>` : ""}${shape}<text x="${kx + dx}" y="${ky + dy}" text-anchor="${anchor}">${this.esc(label)}</text></g>`);
+	},
+
+	/* Hybrid: the host drives a horizontal bus; idle sessions tap off above it,
+	 * busy sessions drop below it and become their own star of activity. */
+	renderHybrid (sessions) {
+		const W = this.config.mapWidth;
+		const H = this.config.mapHeight;
+		const busY = 58;
+		const hostX = 22;
+		const x0 = 78;
+		const x1 = W - 12;
+		const edges = [];
+		const nodes = [];
+		const anim = [];
+
+		edges.push(`<line class="tc-bus" x1="${hostX}" y1="${busY}" x2="${x1}" y2="${busY}"/>`);
+		edges.push(`<line class="tc-bus" x1="${x1}" y1="${busY - 6}" x2="${x1}" y2="${busY + 6}"/>`);
+		nodes.push(`<g class="tc-host"><circle cx="${hostX}" cy="${busY}" r="12"/><text x="${hostX - 12}" y="${busY + 30}" text-anchor="start">${this.esc(this.tc.host)}</text></g>`);
+
+		const weights = sessions.map((s) => (this.isBusy(s) ? 3 + this.children(s).length * 0.3 : 1));
+		const total = weights.reduce((a, b) => a + b, 0) || 1;
+		let x = x0;
+		sessions.forEach((s, i) => {
+			const slotW = ((x1 - x0) * weights[i]) / total;
+			const tx = x + slotW / 2;
+			x += slotW;
+			const cls = `tc-sess tc-${this.esc(s.status)}`;
+
+			if (!this.isBusy(s)) {
+				const top = busY - 22;
+				edges.push(`<line class="tc-edge" x1="${tx}" y1="${busY}" x2="${tx}" y2="${top}"/>`);
+				nodes.push(`<g class="${cls}"><circle cx="${tx}" cy="${top}" r="5"/><text x="${tx}" y="${top - 10}" text-anchor="middle">${this.esc(this.trunc(s.project, Math.max(6, Math.floor(slotW / 6.5))))}</text></g>`);
+				return;
+			}
+
+			// busy: drop below the bus to a hub, fan activity out underneath
+			const hubY = busY + 46;
+			edges.push(`<line class="tc-edge tc-flow" x1="${tx}" y1="${busY}" x2="${tx}" y2="${hubY}"/>`);
+			anim.push(`<circle class="tc-packet" r="3"><animateMotion dur="1.6s" repeatCount="indefinite" path="M${hostX},${busY} H${tx} V${hubY}"/></circle>`);
+			const kids = this.children(s);
+			const rx = Math.max(40, Math.min(slotW / 2 - 60, 170));
+			const ry = Math.min(H - hubY - 26, 190);
+			const a0 = 0.1 * Math.PI;
+			const a1 = 0.9 * Math.PI;
+			kids.forEach((k, j) => {
+				const ka = kids.length === 1 ? Math.PI / 2 : a0 + ((a1 - a0) * j) / (kids.length - 1);
+				const kr = j % 2 ? 0.78 : 1;
+				this.kidNode(k, j, tx + Math.cos(ka) * rx * kr, hubY + Math.sin(ka) * ry * kr, ka, tx, hubY, edges, nodes);
+			});
+			nodes.push(`<g class="${cls} tc-busy"><circle cx="${tx}" cy="${hubY}" r="9"/><text x="${tx + 14}" y="${hubY - 6}" text-anchor="start">${this.esc(this.trunc(s.project, 18))}</text></g>`);
+		});
+
+		return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${edges.join("")}${anim.join("")}${nodes.join("")}</svg>`;
+	},
+
+	/* Star: host in the centre, sessions on an inner ring, activity on an outer ring. */
+	renderStar (sessions) {
 		const W = this.config.mapWidth;
 		const H = this.config.mapHeight;
 		const cx = W / 2;
@@ -125,10 +206,7 @@ Module.register("MMM-terminalClaude", {
 
 		nodes.push(`<g class="tc-host"><circle cx="${cx}" cy="${cy}" r="15"/><text x="${cx}" y="${cy + 30}" text-anchor="middle">${this.esc(this.tc.host)}</text></g>`);
 
-		const children = (s) => [
-			...s.activity.map((a) => ({ ...a, sub: false })),
-			...s.subagents.map((a) => ({ sub: true, kind: "agent", tool: a.type, target: a.description || (a.current && a.current.target), running: true }))
-		];
+		const children = (s) => this.children(s);
 		const weights = sessions.map((s) => 1 + children(s).length * 0.6);
 		const total = weights.reduce((a, b) => a + b, 0) || 1;
 		let ang = -Math.PI / 2 - ((weights[0] || 0) / total) * Math.PI;
@@ -139,7 +217,7 @@ Module.register("MMM-terminalClaude", {
 			ang += span;
 			const sx = cx + Math.cos(a) * R1x;
 			const sy = cy + Math.sin(a) * R1y;
-			const busy = s.status === "busy" || s.subagents.length > 0;
+			const busy = this.isBusy(s);
 			edges.push(`<line class="tc-edge ${busy ? "tc-flow" : ""}" x1="${cx}" y1="${cy}" x2="${sx}" y2="${sy}"/>`);
 
 			const kids = busy ? children(s) : [];
@@ -147,19 +225,7 @@ Module.register("MMM-terminalClaude", {
 			kids.forEach((k, j) => {
 				const ka = kids.length === 1 ? a : a - kSpan / 2 + (kSpan * j) / (kids.length - 1);
 				const kr = j % 2 ? 0.92 : 1;
-				const kx = cx + Math.cos(ka) * R2x * kr;
-				const ky = cy + Math.sin(ka) * R2y * kr;
-				const col = this.KIND_COLORS[k.kind] || this.KIND_COLORS.other;
-				const op = k.running ? 1 : Math.max(0.35, 1 - j * 0.1);
-				edges.push(`<line class="tc-edge ${k.running ? "tc-flow" : ""}" style="stroke:${col};opacity:${op * 0.7}" x1="${sx}" y1="${sy}" x2="${kx}" y2="${ky}"/>`);
-				const anchor = Math.cos(ka) > 0.25 ? "start" : Math.cos(ka) < -0.25 ? "end" : "middle";
-				const dx = anchor === "start" ? 9 : anchor === "end" ? -9 : 0;
-				const dy = anchor === "middle" ? (Math.sin(ka) > 0 ? 16 : -10) : 4;
-				const shape = k.sub
-					? `<rect x="${kx - 5}" y="${ky - 5}" width="10" height="10" transform="rotate(45 ${kx} ${ky})" style="fill:${col}"/>`
-					: `<circle cx="${kx}" cy="${ky}" r="${4 + Math.min(k.count || 1, 4)}" style="fill:${col}"/>`;
-				const label = `${k.tool}${k.target ? ` · ${this.trunc(k.target, 18)}` : ""}${k.count > 1 ? ` ×${k.count}` : ""}`;
-				nodes.push(`<g class="tc-kid ${k.running ? "tc-running" : ""}" style="opacity:${op}">${k.running ? `<circle class="tc-ping" cx="${kx}" cy="${ky}" r="8" style="stroke:${col}"/>` : ""}${shape}<text x="${kx + dx}" y="${ky + dy}" text-anchor="${anchor}">${this.esc(label)}</text></g>`);
+				this.kidNode(k, j, cx + Math.cos(ka) * R2x * kr, cy + Math.sin(ka) * R2y * kr, ka, sx, sy, edges, nodes);
 			});
 
 			const anchor = kids.length ? "middle" : Math.cos(a) > 0.25 ? "start" : Math.cos(a) < -0.25 ? "end" : "middle";

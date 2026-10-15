@@ -2,7 +2,7 @@
 
 A [MagicMirror²](https://magicmirror.builders) module that shows what Claude Code is doing on the box the mirror runs on.
 
-- **Live topology map**: the host sits in the centre and every running Claude Code session is a node around it. A busy session fans out into its recent tool calls (files edited or read, commands, web lookups, MCP calls) and any active subagents. The running call pulses.
+- **Live topology map** (hybrid bus + star): the host drives a horizontal bus. Idle and waiting sessions tap off above it. Each busy session drops below the bus and becomes its own star of recent tool calls (files edited or read, commands, web lookups, MCP calls) and active subagents. Packets flow along the bus to busy sessions, and the running call pulses. Set `layout: "star"` for the plain star layout.
 - **Usage bars**: session (5 h) usage and weekly usage as percentages, each with a countdown to its reset. A white tick on each bar marks how far into the window you are.
 - **Only shown while Claude is working**: the module fades in when any session goes `busy` and fades out `hideDelay` ms after the last one stops.
 
@@ -46,6 +46,7 @@ There are no npm dependencies. It needs Node 18+ for the built-in `fetch`.
 | `pollInterval` | `2000` | How often sessions and transcripts are scanned (ms) |
 | `usageInterval` | `180000` | Minimum time between usage API calls (ms) |
 | `hideDelay` | `30000` | How long the module stays visible after work stops (ms) |
+| `layout` | `"hybrid"` | `"hybrid"` (bus of sessions, star per busy session) or `"star"` |
 | `alwaysShow` | `false` | Never hide the module (for layout testing) |
 | `showIdleSessions` | `true` | Draw idle and waiting sessions as dim nodes |
 | `maxActivity` | `7` | Activity nodes shown per busy session |
