@@ -86,7 +86,7 @@ module.exports = NodeHelper.create({
 				subagents: []
 			};
 			if (busy) {
-				const t = this.parseTranscript(transcript, this.config.maxActivity);
+				const t = this.parseTranscript(transcript, this.config.maxActivity, s.cwd);
 				sess.activity = t.activity;
 				sess.current = t.current;
 				sess.model = t.model;
@@ -151,7 +151,16 @@ module.exports = NodeHelper.create({
 		}
 	},
 
-	describeTool (name, input = {}) {
+	// Folder a file belongs to, relative to the session's repo ("." = repo root)
+	folderOf (p, cwd) {
+		const dir = path.dirname(String(p));
+		if (!cwd) return dir;
+		const rel = path.relative(cwd, dir);
+		if (!rel) return ".";
+		return rel.startsWith("..") ? dir.replace(os.homedir(), "~") : rel;
+	},
+
+	describeTool (name, input = {}, cwd = null) {
 		const base = (p) => path.basename(String(p));
 		let target = "";
 		if (input.file_path || input.notebook_path) target = base(input.file_path || input.notebook_path);
@@ -178,10 +187,17 @@ module.exports = NodeHelper.create({
 					: /^(WebFetch|WebSearch)$/.test(name) || name.startsWith("mcp__") ? "net"
 						: /^(Agent|Task)$/.test(name) ? "agent" : "other";
 		const short = name.startsWith("mcp__") ? name.split("__").slice(-1)[0] : name;
-		return { tool: short, kind, target: target.slice(0, 60) };
+		// Which star on the bus this lands in: the touched folder, or a pseudo-folder
+		const file = input.file_path || input.notebook_path;
+		const group = file ? this.folderOf(file, cwd)
+			: input.path ? (path.relative(cwd || "", String(input.path)) || ".")
+				: kind === "exec" ? "$ shell"
+					: kind === "net" ? "web"
+						: kind === "agent" ? "agents" : short;
+		return { tool: short, kind, target: target.slice(0, 60), group };
 	},
 
-	parseTranscript (file, max) {
+	parseTranscript (file, max, cwd = null) {
 		const uses = [];
 		const done = new Set();
 		let model = null;
@@ -199,7 +215,7 @@ module.exports = NodeHelper.create({
 				if (msg.model) model = msg.model;
 				for (const c of msg.content) {
 					if (c.type === "tool_use") {
-						uses.push({ id: c.id, ts: Date.parse(e.timestamp) || 0, ...this.describeTool(c.name, c.input) });
+						uses.push({ id: c.id, ts: Date.parse(e.timestamp) || 0, ...this.describeTool(c.name, c.input, cwd) });
 					}
 				}
 			} else if (msg.role === "user") {
@@ -218,7 +234,7 @@ module.exports = NodeHelper.create({
 				seen.get(key).count++;
 				continue;
 			}
-			const item = { tool: u.tool, kind: u.kind, target: u.target, ts: u.ts, count: 1, running: !!(current && current.id === u.id) };
+			const item = { tool: u.tool, kind: u.kind, target: u.target, group: u.group, ts: u.ts, count: 1, running: !!(current && current.id === u.id) };
 			seen.set(key, item);
 			activity.push(item);
 		}

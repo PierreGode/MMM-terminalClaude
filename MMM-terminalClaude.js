@@ -10,7 +10,9 @@ Module.register("MMM-terminalClaude", {
 		hideDelay: 30 * 1000, // keep visible this long after work stops (ms)
 		alwaysShow: false, // debug: never hide
 		showIdleSessions: true, // draw idle/waiting sessions as dim nodes
-		maxActivity: 7, // activity nodes per busy session
+		maxActivity: 14, // recent distinct actions per busy session
+		maxGroups: 6, // hybrid: folder stars per bus
+		maxLeaves: 4, // hybrid: files per folder star
 		maxSubagents: 4,
 		subagentActiveMs: 60 * 1000,
 		layout: "hybrid", // "hybrid" (bus of sessions, star per busy session) or "star"
@@ -136,64 +138,78 @@ Module.register("MMM-terminalClaude", {
 		nodes.push(`<g class="tc-kid ${k.running ? "tc-running" : ""}" style="opacity:${op}">${k.running ? `<circle class="tc-ping" cx="${kx}" cy="${ky}" r="8" style="stroke:${col}"/>` : ""}${shape}<text x="${kx + dx}" y="${ky + dy}" text-anchor="${anchor}">${this.esc(label)}</text></g>`);
 	},
 
-	/* Hybrid: a horizontal bus links every session. Each busy repo sits on the bus as
-	 * the centre of its own star of activity; idle repos tap off the bus at the sides. */
+	/* Hybrid: the repo sits at the far left of a bus; every folder touched taps off the
+	 * bus (alternating above/below) and is the hub of a star of the files touched in it.
+	 * Commands, web lookups and subagents get their own pseudo-folders. */
 	renderHybrid (sessions) {
 		const W = this.config.mapWidth;
 		const H = this.config.mapHeight;
-		const busY = H / 2;
-		const bx0 = 8;
-		const bx1 = W - 8;
+		const busy = sessions.filter((s) => this.isBusy(s));
+		const rowH = H / Math.max(1, busy.length);
 		const edges = [];
 		const nodes = [];
 		const anim = [];
 
-		// Busy repos in the middle, idle ones split to either side
-		const busy = sessions.filter((s) => this.isBusy(s));
-		const idle = sessions.filter((s) => !this.isBusy(s));
-		const half = Math.ceil(idle.length / 2);
-		const order = [...idle.slice(0, half), ...busy, ...idle.slice(half)];
+		busy.forEach((s, row) => {
+			const busY = rowH * row + rowH / 2;
+			const repoX = 24;
+			const busEnd = W - 8;
+			edges.push(`<line class="tc-bus" x1="${repoX}" y1="${busY}" x2="${busEnd}" y2="${busY}"/>`);
+			edges.push(`<line class="tc-bus" x1="${busEnd}" y1="${busY - 6}" x2="${busEnd}" y2="${busY + 6}"/>`);
+			nodes.push(`<g class="tc-sess tc-busy tc-repo"><circle cx="${repoX}" cy="${busY}" r="14"/><text x="${repoX - 14}" y="${busY - 24}" text-anchor="start">${this.esc(this.trunc(s.project, 24))}</text></g>`);
 
-		edges.push(`<line class="tc-bus" x1="${bx0}" y1="${busY}" x2="${bx1}" y2="${busY}"/>`);
-		for (const ex of [bx0, bx1]) edges.push(`<line class="tc-bus" x1="${ex}" y1="${busY - 6}" x2="${ex}" y2="${busY + 6}"/>`);
-		nodes.push(`<text class="tc-hostlabel" x="${bx0}" y="${busY + 20}" text-anchor="start">${this.esc(this.tc.host)}</text>`);
-
-		const weights = order.map((s) => (this.isBusy(s) ? 4 + this.children(s).length * 0.4 : 1));
-		const total = weights.reduce((acc, w) => acc + w, 0) || 1;
-		let x = bx0 + 10;
-		let idleIdx = 0;
-		order.forEach((s, i) => {
-			const slotW = ((bx1 - bx0 - 20) * weights[i]) / total;
-			const tx = x + slotW / 2;
-			x += slotW;
-			const cls = `tc-sess tc-${this.esc(s.status)}`;
-
-			if (!this.isBusy(s)) {
-				// alternate above/below the bus so neighbouring labels don't collide
-				const up = idleIdx++ % 2 === 0;
-				const ty = busY + (up ? -24 : 24);
-				edges.push(`<line class="tc-edge" x1="${tx}" y1="${busY}" x2="${tx}" y2="${ty}"/>`);
-				nodes.push(`<g class="${cls}"><circle cx="${tx}" cy="${ty}" r="5"/><text x="${tx}" y="${up ? ty - 10 : ty + 18}" text-anchor="middle">${this.esc(this.trunc(s.project, 16))}</text></g>`);
-				return;
+			// Group activity by folder, most recently touched first
+			const groups = [];
+			const byName = new Map();
+			for (const k of this.children(s)) {
+				const name = k.sub ? "agents" : (k.group || k.tool);
+				if (!byName.has(name)) {
+					const g = { name, kids: [] };
+					byName.set(name, g);
+					groups.push(g);
+				}
+				byName.get(name).kids.push(k);
 			}
+			const G = Math.min(groups.length, this.config.maxGroups);
+			const tap = Math.min(rowH * 0.17, 48);
+			const leafR = Math.max(26, Math.min(rowH / 2 - tap - 24, 58));
+			const gx0 = repoX + 64;
+			const gw = (busEnd - 40 - gx0) / Math.max(1, G);
 
-			anim.push(`<circle class="tc-packet" r="3"><animateMotion dur="2s" repeatCount="indefinite" path="M${bx0},${busY} H${tx}"/></circle>`);
-			anim.push(`<circle class="tc-packet" r="3"><animateMotion dur="2s" repeatCount="indefinite" path="M${bx1},${busY} H${tx}"/></circle>`);
-			// activity alternates between the arc above and the arc below the bus
-			const kids = this.children(s);
-			const rx = Math.max(50, Math.min(slotW / 2 - 50, 170));
-			const ry = busY - 26;
-			const upper = kids.filter((k, j) => j % 2 === 0);
-			const lower = kids.filter((k, j) => j % 2 === 1);
-			const place = (list, sign) => list.forEach((k, n) => {
-				const t = list.length === 1 ? 0.5 : n / (list.length - 1);
-				const ka = sign * (0.18 + 0.64 * t) * Math.PI;
-				const kr = n % 2 ? 0.8 : 1;
-				this.kidNode(k, kids.indexOf(k), tx + Math.cos(ka) * rx * kr, busY + Math.sin(ka) * ry * kr, ka, tx, busY, edges, nodes);
+			groups.slice(0, G).forEach((g, gi) => {
+				const up = gi % 2 === 0;
+				const sign = up ? -1 : 1;
+				const hx = gx0 + gw * (gi + 0.5);
+				const hy = busY + sign * tap;
+				const running = g.kids.some((k) => k.running);
+				const col = this.KIND_COLORS[g.kids[0].kind] || this.KIND_COLORS.other;
+				edges.push(`<line class="tc-edge${running ? " tc-flow" : ""}" style="stroke:${col}" x1="${hx}" y1="${busY}" x2="${hx}" y2="${hy}"/>`);
+				if (running) anim.push(`<circle class="tc-packet" r="3"><animateMotion dur="1.8s" repeatCount="indefinite" path="M${repoX},${busY} H${hx} V${hy}"/></circle>`);
+
+				const leaves = g.kids.slice(0, this.config.maxLeaves);
+				const extra = g.kids.length - leaves.length;
+				const spread = Math.min(Math.PI * 0.8, (Math.PI / 4) * (leaves.length - 1));
+				leaves.forEach((k, li) => {
+					const t = leaves.length === 1 ? 0 : li / (leaves.length - 1) - 0.5;
+					const ka = sign * Math.PI / 2 + spread * t;
+					const lx = hx + Math.cos(ka) * leafR;
+					const ly = hy + Math.sin(ka) * leafR;
+					const lc = this.KIND_COLORS[k.kind] || this.KIND_COLORS.other;
+					const op = k.running ? 1 : Math.max(0.45, 1 - groups.indexOf(g) * 0.12);
+					const anchor = Math.cos(ka) > 0.3 ? "start" : Math.cos(ka) < -0.3 ? "end" : "middle";
+					const dx = anchor === "start" ? 8 : anchor === "end" ? -8 : 0;
+					const dy = anchor === "middle" ? (up ? -10 : 18) : 4;
+					const label = `${this.trunc(k.target || k.tool, 16)}${k.count > 1 ? ` ×${k.count}` : ""}`;
+					edges.push(`<line class="tc-edge${k.running ? " tc-flow" : ""}" style="stroke:${lc};opacity:${op * 0.7}" x1="${hx}" y1="${hy}" x2="${lx}" y2="${ly}"/>`);
+					const shape = k.sub
+						? `<rect x="${lx - 5}" y="${ly - 5}" width="10" height="10" transform="rotate(45 ${lx} ${ly})" style="fill:${lc}"/>`
+						: `<circle cx="${lx}" cy="${ly}" r="${3 + Math.min(k.count || 1, 3)}" style="fill:${lc}"/>`;
+					nodes.push(`<g class="tc-kid${k.running ? " tc-running" : ""}" style="opacity:${op}">${k.running ? `<circle class="tc-ping" cx="${lx}" cy="${ly}" r="7" style="stroke:${lc}"/>` : ""}${shape}<text x="${lx + dx}" y="${ly + dy}" text-anchor="${anchor}">${this.esc(label)}</text></g>`);
+				});
+
+				const folder = g.name === "." ? "./" : g.name.split("/").filter(Boolean).slice(-1)[0] || g.name;
+				nodes.push(`<g class="tc-hub${running ? " tc-hub-live" : ""}"><rect x="${hx - 6}" y="${hy - 6}" width="12" height="12" rx="2" style="stroke:${col}"/><text x="${hx + 9}" y="${(busY + hy) / 2 + 4}" text-anchor="start">${this.esc(this.trunc(folder, 18))}${extra > 0 ? ` +${extra}` : ""}</text></g>`);
 			});
-			place(upper, -1);
-			place(lower, 1);
-			nodes.push(`<g class="${cls} tc-busy tc-center"><circle cx="${tx}" cy="${busY}" r="15"/><text x="${tx}" y="${busY + 4}" text-anchor="middle">${this.esc(this.trunc(s.project, 18))}</text></g>`);
 		});
 
 		return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${edges.join("")}${anim.join("")}${nodes.join("")}</svg>`;
@@ -256,6 +272,10 @@ Module.register("MMM-terminalClaude", {
 			const subs = s.subagents.length ? ` <span class="tc-dim">+${s.subagents.length} agent${s.subagents.length > 1 ? "s" : ""}</span>` : "";
 			return `<div class="tc-now-row"><span class="tc-dot"></span><b>${this.esc(s.name)}</b> ${what}${subs}</div>`;
 		}).join("");
+		const idle = this.tc.sessions.filter((s) => !this.isBusy(s));
+		if (this.config.layout !== "star" && this.config.showIdleSessions && idle.length) {
+			this.el.now.innerHTML += `<div class="tc-now-row tc-dim">idle: ${idle.map((s) => `${this.esc(s.project)}${s.status === "waiting" ? " (waiting)" : ""}`).join(" · ")}</div>`;
+		}
 	},
 
 	/* ---------- usage bars ---------- */

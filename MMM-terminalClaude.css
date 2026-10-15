@@ -1,6 +1,6 @@
 .tc-wrap {
   display: flex;
-  gap: 22px;
+  gap: 60px;
   align-items: flex-start;
   font-family: "Roboto Condensed", sans-serif;
   color: #ccc;
@@ -20,8 +20,10 @@
 .tc-host circle { fill: #e07a4f; filter: drop-shadow(0 0 8px #e07a4f); }
 .tc-host text { font-size: 12px; fill: #fff; font-weight: bold; }
 .tc-map text.tc-hostlabel { font-size: 10px; fill: #666; letter-spacing: 1px; }
-/* busy repo at the centre of its star; name drawn on a dark plate over the hub */
-.tc-sess.tc-center text { font-size: 14px; paint-order: stroke; stroke: #000; stroke-width: 4px; }
+.tc-sess.tc-repo text { font-size: 14px; }
+.tc-hub rect { fill: #111; stroke-width: 2; }
+.tc-hub text { fill: #ddd; font-size: 12px; }
+.tc-hub-live rect { fill: #333; }
 
 .tc-sess circle { fill: #444; stroke: #777; stroke-width: 1.5; }
 .tc-sess text { fill: #888; }

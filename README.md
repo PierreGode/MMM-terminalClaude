@@ -2,7 +2,7 @@
 
 A [MagicMirror²](https://magicmirror.builders) module that shows what Claude Code is doing on the box the mirror runs on.
 
-- **Live topology map** (hybrid bus + star): the repo Claude is working in sits at the centre, on a horizontal bus, with its recent tool calls (files edited or read, commands, web lookups, MCP calls) and active subagents radiating around it. Idle and waiting repos tap off the bus on either side. Packets flow along the bus into busy repos, and the running call pulses. Set `layout: "star"` for the plain star layout with the host in the centre.
+- **Live topology map** (hybrid bus + star): the repo Claude is working in sits at the far left of a bus. Every folder touched branches off the bus, alternating above and below, as the hub of a star of the files touched in it. Shell commands, web lookups and subagents get their own hubs (`$ shell`, `web`, `agents`). Packets run along the bus to the folder being worked on, and the running action pulses. Idle sessions are listed under the map. Set `layout: "star"` for the plain star layout with the host in the centre.
 - **Usage bars**: session (5 h) usage and weekly usage as percentages, each with a countdown to its reset. A white tick on each bar marks how far into the window you are.
 - **Only shown while Claude is working**: the module fades in when any session goes `busy` and fades out `hideDelay` ms after the last one stops.
 
@@ -49,7 +49,9 @@ There are no npm dependencies. It needs Node 18+ for the built-in `fetch`.
 | `layout` | `"hybrid"` | `"hybrid"` (bus of sessions, star per busy session) or `"star"` |
 | `alwaysShow` | `false` | Never hide the module (for layout testing) |
 | `showIdleSessions` | `true` | Draw idle and waiting sessions as dim nodes |
-| `maxActivity` | `7` | Activity nodes shown per busy session |
+| `maxActivity` | `14` | Recent distinct actions tracked per busy session |
+| `maxGroups` | `6` | Hybrid layout: folder stars per bus |
+| `maxLeaves` | `4` | Hybrid layout: files shown per folder star (the rest are counted as `+n`) |
 | `maxSubagents` | `4` | Subagent nodes shown per session |
 | `subagentActiveMs` | `60000` | A subagent counts as active if its transcript changed within this window |
 | `mapWidth` / `mapHeight` | `560` / `340` | Size of the topology SVG (px) |
