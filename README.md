@@ -2,7 +2,7 @@
 
 A [MagicMirror²](https://magicmirror.builders) module that shows what Claude Code is doing on the box the mirror runs on.
 
-- **Live topology map** (hybrid bus + star): the repo Claude is working in sits at the far left of a bus. Every folder touched branches off the bus, alternating above and below, as the hub of a star of the files touched in it. Shell commands, web lookups and subagents get their own hubs (`$ shell`, `web`, `agents`). Packets run along the bus to the folder being worked on, and the running action pulses. Idle sessions are listed under the map. Set `layout: "star"` for the plain star layout with the host in the centre.
+- **Live topology map** (hybrid bus + star): the repo Claude is working in sits at the far left of a bus. Every folder touched branches off the bus, alternating above and below, as the hub of a star of the files touched in it. Shell commands, web lookups and subagents get their own hubs (`$ shell`, `web`, `agents`). Packets run along the bus to the folder being worked on, and the running action pulses. Only repos Claude is actively working in are shown; if it works in several at once, each gets its own bus. Set `layout: "star"` for the plain star layout with the host in the centre.
 - **Usage bars**: session (5 h) usage and weekly usage as percentages, each with a countdown to its reset. A white tick on each bar marks how far into the window you are.
 - **Only shown while Claude is working**: the module fades in when any session goes `busy` and fades out `hideDelay` ms after the last one stops.
 
@@ -48,7 +48,7 @@ There are no npm dependencies. It needs Node 18+ for the built-in `fetch`.
 | `hideDelay` | `30000` | How long the module stays visible after work stops (ms) |
 | `layout` | `"hybrid"` | `"hybrid"` (bus of sessions, star per busy session) or `"star"` |
 | `alwaysShow` | `false` | Never hide the module (for layout testing) |
-| `showIdleSessions` | `true` | Draw idle and waiting sessions as dim nodes |
+| `showIdleSessions` | `false` | Star layout only: also draw idle and waiting sessions as dim nodes |
 | `maxActivity` | `14` | Recent distinct actions tracked per busy session |
 | `maxGroups` | `6` | Hybrid layout: folder stars per bus |
 | `maxLeaves` | `4` | Hybrid layout: files shown per folder star (the rest are counted as `+n`) |

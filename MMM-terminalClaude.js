@@ -9,7 +9,7 @@ Module.register("MMM-terminalClaude", {
 		usageInterval: 3 * 60 * 1000, // usage endpoint poll while working (ms)
 		hideDelay: 30 * 1000, // keep visible this long after work stops (ms)
 		alwaysShow: false, // debug: never hide
-		showIdleSessions: true, // draw idle/waiting sessions as dim nodes
+		showIdleSessions: false, // star layout: also draw idle/waiting sessions as dim nodes
 		maxActivity: 14, // recent distinct actions per busy session
 		maxGroups: 6, // hybrid: folder stars per bus
 		maxLeaves: 4, // hybrid: files per folder star
@@ -272,10 +272,6 @@ Module.register("MMM-terminalClaude", {
 			const subs = s.subagents.length ? ` <span class="tc-dim">+${s.subagents.length} agent${s.subagents.length > 1 ? "s" : ""}</span>` : "";
 			return `<div class="tc-now-row"><span class="tc-dot"></span><b>${this.esc(s.name)}</b> ${what}${subs}</div>`;
 		}).join("");
-		const idle = this.tc.sessions.filter((s) => !this.isBusy(s));
-		if (this.config.layout !== "star" && this.config.showIdleSessions && idle.length) {
-			this.el.now.innerHTML += `<div class="tc-now-row tc-dim">idle: ${idle.map((s) => `${this.esc(s.project)}${s.status === "waiting" ? " (waiting)" : ""}`).join(" · ")}</div>`;
-		}
 	},
 
 	/* ---------- usage bars ---------- */
