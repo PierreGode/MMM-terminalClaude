@@ -176,14 +176,14 @@ Module.register("MMM-terminalClaude", {
 		rows.forEach((r, row) => {
 			const busY = rowH * row + rowH / 2;
 			const name = this.trunc(r.name, 22);
-			const pillW = Math.ceil(this.textWidth(name, "bold 14px 'Roboto Condensed', sans-serif")) + 26;
+			const pillW = Math.ceil(this.textWidth(name, "bold 12px 'Roboto Condensed', sans-serif")) + 22;
 			const pillX = 2;
 			const busX = pillX + pillW;
 			const busEnd = W - 8;
 			const live = r.kids.some((k) => k.running);
 			edges.push(`<line class="tc-bus" x1="${busX}" y1="${busY}" x2="${busEnd}" y2="${busY}"/>`);
 			edges.push(`<line class="tc-bus" x1="${busEnd}" y1="${busY - 6}" x2="${busEnd}" y2="${busY + 6}"/>`);
-			nodes.push(`<g class="tc-repo${live ? " tc-repo-live" : ""}"><rect x="${pillX}" y="${busY - 15}" width="${pillW}" height="30" rx="15"/><text x="${pillX + pillW / 2}" y="${busY + 5}" text-anchor="middle">${this.esc(name)}</text></g>`);
+			nodes.push(`<g class="tc-repo${live ? " tc-repo-live" : ""}"><rect x="${pillX}" y="${busY - 13}" width="${pillW}" height="26" rx="13"/><text x="${pillX + pillW / 2}" y="${busY + 4}" text-anchor="middle">${this.esc(name)}</text></g>`);
 
 			// Group by folder, most recently touched first
 			const groups = [];
