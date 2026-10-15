@@ -1,0 +1,11 @@
+{
+  "name": "mmm-terminalclaude",
+  "version": "1.0.0",
+  "description": "MagicMirror module: live topology of Claude Code activity on this host plus plan usage bars",
+  "main": "MMM-terminalClaude.js",
+  "author": "PierreGode",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}

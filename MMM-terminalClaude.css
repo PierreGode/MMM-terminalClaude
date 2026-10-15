@@ -1,0 +1,56 @@
+.tc-wrap {
+  display: flex;
+  gap: 22px;
+  align-items: flex-start;
+  font-family: "Roboto Condensed", sans-serif;
+  color: #ccc;
+  text-align: left;
+}
+
+/* ---------- map ---------- */
+.tc-map svg { display: block; overflow: visible; }
+.tc-map text { font-size: 11px; fill: #bbb; }
+
+.tc-edge { stroke: #555; stroke-width: 1.2; }
+.tc-flow { stroke-dasharray: 4 4; animation: tc-flow 0.8s linear infinite; }
+@keyframes tc-flow { to { stroke-dashoffset: -8; } }
+
+.tc-host circle { fill: #e07a4f; filter: drop-shadow(0 0 8px #e07a4f); }
+.tc-host text { font-size: 12px; fill: #fff; font-weight: bold; }
+
+.tc-sess circle { fill: #444; stroke: #777; stroke-width: 1.5; }
+.tc-sess text { fill: #888; }
+.tc-sess.tc-waiting circle { fill: #8a6d1f; stroke: #e5b93a; }
+.tc-sess.tc-busy circle { fill: #e07a4f; stroke: #ffd2bd; animation: tc-pulse 1.4s ease-in-out infinite; }
+.tc-sess.tc-busy text { fill: #fff; font-weight: bold; font-size: 12px; }
+@keyframes tc-pulse { 50% { filter: drop-shadow(0 0 7px #e07a4f); } }
+
+.tc-kid text { fill: #aaa; }
+.tc-running text { fill: #fff; }
+.tc-ping { fill: none; stroke-width: 2; transform-box: fill-box; transform-origin: center; animation: tc-ping 1.2s ease-out infinite; }
+@keyframes tc-ping { from { transform: scale(0.6); opacity: 1; } to { transform: scale(2.2); opacity: 0; } }
+
+/* ---------- now ---------- */
+.tc-now { margin-top: 6px; font-size: 14px; line-height: 1.5; max-width: 460px; }
+.tc-now-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tc-now b { color: #fff; margin-right: 4px; }
+.tc-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #e07a4f; animation: tc-pulse 1.4s infinite; vertical-align: middle; }
+.tc-dim { color: #777; }
+
+/* ---------- usage ---------- */
+.tc-usage { width: 200px; padding-top: 8px; }
+.tc-title { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #999; border-bottom: 1px solid #444; padding-bottom: 4px; margin-bottom: 12px; }
+.tc-bar { margin-bottom: 16px; }
+.tc-bar-head { display: flex; justify-content: space-between; font-size: 14px; color: #ddd; }
+.tc-pct { font-weight: bold; color: #fff; }
+.tc-track { position: relative; height: 10px; margin: 4px 0; background: #222; border-radius: 5px; overflow: hidden; }
+.tc-fill { height: 100%; border-radius: 5px; background: #5be37d; }
+.tc-warn .tc-fill { background: #ffb04a; }
+.tc-crit .tc-fill { background: #ff5a5a; }
+.tc-crit .tc-pct { color: #ff7a7a; }
+.tc-timemark { position: absolute; top: 0; width: 2px; height: 100%; background: rgba(255, 255, 255, 0.7); }
+.tc-reset { font-size: 12px; color: #888; }
+.tc-reset b { color: #ccc; font-weight: normal; }
+.tc-err { font-size: 11px; color: #ff7a7a; margin-bottom: 8px; }
+.tc-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: #888; }
+.tc-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
