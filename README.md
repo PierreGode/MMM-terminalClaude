@@ -2,7 +2,7 @@
 
 A [MagicMirror²](https://magicmirror.builders) module that shows what Claude Code is doing on the box the mirror runs on.
 
-- **Live topology map** (hybrid bus + star): the host drives a horizontal bus. Idle and waiting sessions tap off above it. Each busy session drops below the bus and becomes its own star of recent tool calls (files edited or read, commands, web lookups, MCP calls) and active subagents. Packets flow along the bus to busy sessions, and the running call pulses. Set `layout: "star"` for the plain star layout.
+- **Live topology map** (hybrid bus + star): the repo Claude is working in sits at the centre, on a horizontal bus, with its recent tool calls (files edited or read, commands, web lookups, MCP calls) and active subagents radiating around it. Idle and waiting repos tap off the bus on either side. Packets flow along the bus into busy repos, and the running call pulses. Set `layout: "star"` for the plain star layout with the host in the centre.
 - **Usage bars**: session (5 h) usage and weekly usage as percentages, each with a countdown to its reset. A white tick on each bar marks how far into the window you are.
 - **Only shown while Claude is working**: the module fades in when any session goes `busy` and fades out `hideDelay` ms after the last one stops.
 

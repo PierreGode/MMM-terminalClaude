@@ -136,54 +136,64 @@ Module.register("MMM-terminalClaude", {
 		nodes.push(`<g class="tc-kid ${k.running ? "tc-running" : ""}" style="opacity:${op}">${k.running ? `<circle class="tc-ping" cx="${kx}" cy="${ky}" r="8" style="stroke:${col}"/>` : ""}${shape}<text x="${kx + dx}" y="${ky + dy}" text-anchor="${anchor}">${this.esc(label)}</text></g>`);
 	},
 
-	/* Hybrid: the host drives a horizontal bus; idle sessions tap off above it,
-	 * busy sessions drop below it and become their own star of activity. */
+	/* Hybrid: a horizontal bus links every session. Each busy repo sits on the bus as
+	 * the centre of its own star of activity; idle repos tap off the bus at the sides. */
 	renderHybrid (sessions) {
 		const W = this.config.mapWidth;
 		const H = this.config.mapHeight;
-		const busY = 58;
-		const hostX = 22;
-		const x0 = 78;
-		const x1 = W - 12;
+		const busY = H / 2;
+		const bx0 = 8;
+		const bx1 = W - 8;
 		const edges = [];
 		const nodes = [];
 		const anim = [];
 
-		edges.push(`<line class="tc-bus" x1="${hostX}" y1="${busY}" x2="${x1}" y2="${busY}"/>`);
-		edges.push(`<line class="tc-bus" x1="${x1}" y1="${busY - 6}" x2="${x1}" y2="${busY + 6}"/>`);
-		nodes.push(`<g class="tc-host"><circle cx="${hostX}" cy="${busY}" r="12"/><text x="${hostX - 12}" y="${busY + 30}" text-anchor="start">${this.esc(this.tc.host)}</text></g>`);
+		// Busy repos in the middle, idle ones split to either side
+		const busy = sessions.filter((s) => this.isBusy(s));
+		const idle = sessions.filter((s) => !this.isBusy(s));
+		const half = Math.ceil(idle.length / 2);
+		const order = [...idle.slice(0, half), ...busy, ...idle.slice(half)];
 
-		const weights = sessions.map((s) => (this.isBusy(s) ? 3 + this.children(s).length * 0.3 : 1));
-		const total = weights.reduce((a, b) => a + b, 0) || 1;
-		let x = x0;
-		sessions.forEach((s, i) => {
-			const slotW = ((x1 - x0) * weights[i]) / total;
+		edges.push(`<line class="tc-bus" x1="${bx0}" y1="${busY}" x2="${bx1}" y2="${busY}"/>`);
+		for (const ex of [bx0, bx1]) edges.push(`<line class="tc-bus" x1="${ex}" y1="${busY - 6}" x2="${ex}" y2="${busY + 6}"/>`);
+		nodes.push(`<text class="tc-hostlabel" x="${bx0}" y="${busY + 20}" text-anchor="start">${this.esc(this.tc.host)}</text>`);
+
+		const weights = order.map((s) => (this.isBusy(s) ? 4 + this.children(s).length * 0.4 : 1));
+		const total = weights.reduce((acc, w) => acc + w, 0) || 1;
+		let x = bx0 + 10;
+		let idleIdx = 0;
+		order.forEach((s, i) => {
+			const slotW = ((bx1 - bx0 - 20) * weights[i]) / total;
 			const tx = x + slotW / 2;
 			x += slotW;
 			const cls = `tc-sess tc-${this.esc(s.status)}`;
 
 			if (!this.isBusy(s)) {
-				const top = busY - 22;
-				edges.push(`<line class="tc-edge" x1="${tx}" y1="${busY}" x2="${tx}" y2="${top}"/>`);
-				nodes.push(`<g class="${cls}"><circle cx="${tx}" cy="${top}" r="5"/><text x="${tx}" y="${top - 10}" text-anchor="middle">${this.esc(this.trunc(s.project, Math.max(6, Math.floor(slotW / 6.5))))}</text></g>`);
+				// alternate above/below the bus so neighbouring labels don't collide
+				const up = idleIdx++ % 2 === 0;
+				const ty = busY + (up ? -24 : 24);
+				edges.push(`<line class="tc-edge" x1="${tx}" y1="${busY}" x2="${tx}" y2="${ty}"/>`);
+				nodes.push(`<g class="${cls}"><circle cx="${tx}" cy="${ty}" r="5"/><text x="${tx}" y="${up ? ty - 10 : ty + 18}" text-anchor="middle">${this.esc(this.trunc(s.project, 16))}</text></g>`);
 				return;
 			}
 
-			// busy: drop below the bus to a hub, fan activity out underneath
-			const hubY = busY + 46;
-			edges.push(`<line class="tc-edge tc-flow" x1="${tx}" y1="${busY}" x2="${tx}" y2="${hubY}"/>`);
-			anim.push(`<circle class="tc-packet" r="3"><animateMotion dur="1.6s" repeatCount="indefinite" path="M${hostX},${busY} H${tx} V${hubY}"/></circle>`);
+			anim.push(`<circle class="tc-packet" r="3"><animateMotion dur="2s" repeatCount="indefinite" path="M${bx0},${busY} H${tx}"/></circle>`);
+			anim.push(`<circle class="tc-packet" r="3"><animateMotion dur="2s" repeatCount="indefinite" path="M${bx1},${busY} H${tx}"/></circle>`);
+			// activity alternates between the arc above and the arc below the bus
 			const kids = this.children(s);
-			const rx = Math.max(40, Math.min(slotW / 2 - 60, 170));
-			const ry = Math.min(H - hubY - 26, 190);
-			const a0 = 0.1 * Math.PI;
-			const a1 = 0.9 * Math.PI;
-			kids.forEach((k, j) => {
-				const ka = kids.length === 1 ? Math.PI / 2 : a0 + ((a1 - a0) * j) / (kids.length - 1);
-				const kr = j % 2 ? 0.78 : 1;
-				this.kidNode(k, j, tx + Math.cos(ka) * rx * kr, hubY + Math.sin(ka) * ry * kr, ka, tx, hubY, edges, nodes);
+			const rx = Math.max(50, Math.min(slotW / 2 - 50, 170));
+			const ry = busY - 26;
+			const upper = kids.filter((k, j) => j % 2 === 0);
+			const lower = kids.filter((k, j) => j % 2 === 1);
+			const place = (list, sign) => list.forEach((k, n) => {
+				const t = list.length === 1 ? 0.5 : n / (list.length - 1);
+				const ka = sign * (0.18 + 0.64 * t) * Math.PI;
+				const kr = n % 2 ? 0.8 : 1;
+				this.kidNode(k, kids.indexOf(k), tx + Math.cos(ka) * rx * kr, busY + Math.sin(ka) * ry * kr, ka, tx, busY, edges, nodes);
 			});
-			nodes.push(`<g class="${cls} tc-busy"><circle cx="${tx}" cy="${hubY}" r="9"/><text x="${tx + 14}" y="${hubY - 6}" text-anchor="start">${this.esc(this.trunc(s.project, 18))}</text></g>`);
+			place(upper, -1);
+			place(lower, 1);
+			nodes.push(`<g class="${cls} tc-busy tc-center"><circle cx="${tx}" cy="${busY}" r="15"/><text x="${tx}" y="${busY + 4}" text-anchor="middle">${this.esc(this.trunc(s.project, 18))}</text></g>`);
 		});
 
 		return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${edges.join("")}${anim.join("")}${nodes.join("")}</svg>`;

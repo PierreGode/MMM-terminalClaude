@@ -19,6 +19,9 @@
 
 .tc-host circle { fill: #e07a4f; filter: drop-shadow(0 0 8px #e07a4f); }
 .tc-host text { font-size: 12px; fill: #fff; font-weight: bold; }
+.tc-map text.tc-hostlabel { font-size: 10px; fill: #666; letter-spacing: 1px; }
+/* busy repo at the centre of its star; name drawn on a dark plate over the hub */
+.tc-sess.tc-center text { font-size: 14px; paint-order: stroke; stroke: #000; stroke-width: 4px; }
 
 .tc-sess circle { fill: #444; stroke: #777; stroke-width: 1.5; }
 .tc-sess text { fill: #888; }
