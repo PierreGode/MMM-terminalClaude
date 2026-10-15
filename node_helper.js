@@ -59,6 +59,7 @@ module.exports = NodeHelper.create({
 	readSessions () {
 		const dir = path.join(this.claudeDir, "sessions");
 		const out = [];
+		this.repoCache = new Map();
 		for (const f of fs.readdirSync(dir)) {
 			if (!/^\d+\.json$/.test(f)) continue;
 			let s;
@@ -80,6 +81,8 @@ module.exports = NodeHelper.create({
 				status: s.status || "unknown",
 				waitingFor: s.waitingFor || null,
 				statusSince: s.statusUpdatedAt || s.updatedAt || null,
+				repo: null,
+				repoName: null,
 				activity: [],
 				current: null,
 				model: null,
@@ -91,7 +94,10 @@ module.exports = NodeHelper.create({
 				sess.current = t.current;
 				sess.model = t.model;
 			}
-			sess.subagents = this.readSubagents(path.join(transcriptDir, s.sessionId, "subagents"));
+			// Main repo: where the latest action happened, else the repo the session started in
+			sess.repo = (sess.activity[0] && sess.activity[0].repo) || this.repoRootOf(s.cwd) || s.cwd;
+			sess.repoName = this.repoName(sess.repo);
+			sess.subagents = this.readSubagents(path.join(transcriptDir, s.sessionId, "subagents"), s.cwd);
 			out.push(sess);
 		}
 		const order = { busy: 0, waiting: 1, idle: 2 };
@@ -99,7 +105,7 @@ module.exports = NodeHelper.create({
 		return out;
 	},
 
-	readSubagents (dir) {
+	readSubagents (dir, cwd) {
 		const out = [];
 		let files;
 		try {
@@ -122,7 +128,7 @@ module.exports = NodeHelper.create({
 			try {
 				meta = JSON.parse(fs.readFileSync(p.replace(/\.jsonl$/, ".meta.json"), "utf8"));
 			} catch (e) { /* no meta */ }
-			const t = this.parseTranscript(p, 1);
+			const t = this.parseTranscript(p, 1, cwd);
 			out.push({
 				id: f.replace(/\.jsonl$/, ""),
 				type: meta.agentType || "agent",
@@ -151,16 +157,43 @@ module.exports = NodeHelper.create({
 		}
 	},
 
-	// Folder a file belongs to, relative to the session's repo ("." = repo root)
-	folderOf (p, cwd) {
-		const dir = path.dirname(String(p));
-		if (!cwd) return dir;
-		const rel = path.relative(cwd, dir);
-		if (!rel) return ".";
-		return rel.startsWith("..") ? dir.replace(os.homedir(), "~") : rel;
+	// Nearest enclosing git repo of a directory (.git folder or file), or null
+	repoRootOf (dir) {
+		if (!dir) return null;
+		if (this.repoCache.has(dir)) return this.repoCache.get(dir);
+		let root = null;
+		for (let d = dir; ; d = path.dirname(d)) {
+			if (fs.existsSync(path.join(d, ".git"))) {
+				root = d;
+				break;
+			}
+			if (path.dirname(d) === d) break;
+		}
+		this.repoCache.set(dir, root);
+		return root;
 	},
 
-	describeTool (name, input = {}, cwd = null) {
+	repoName (root) {
+		if (!root) return "?";
+		return root === os.homedir() ? "~" : path.basename(root) || root;
+	},
+
+	// Folder of a location relative to its repo ("." = repo root); "~/…" when it is outside any repo
+	folderIn (dir, root) {
+		if (!root) return dir.replace(os.homedir(), "~");
+		return path.relative(root, dir) || ".";
+	},
+
+	// Directory a shell command switches to when it starts with "cd <dir> &&" / "cd <dir>;"
+	leadingCd (command, base) {
+		const m = /^\s*(?:[A-Za-z_]\w*=(?!\$\()\S*\s*;?\s*)*cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)\s*(?:&&|;)/.exec(command);
+		if (!m) return null;
+		const dir = m[1].replace(/^["']|["']$/g, "");
+		if (dir.includes("$")) return null;
+		return path.resolve(base, dir.replace(/^~(?=$|\/)/, os.homedir()));
+	},
+
+	describeTool (name, input = {}) {
 		const base = (p) => path.basename(String(p));
 		let target = "";
 		if (input.file_path || input.notebook_path) target = base(input.file_path || input.notebook_path);
@@ -187,20 +220,49 @@ module.exports = NodeHelper.create({
 					: /^(WebFetch|WebSearch)$/.test(name) || name.startsWith("mcp__") ? "net"
 						: /^(Agent|Task)$/.test(name) ? "agent" : "other";
 		const short = name.startsWith("mcp__") ? name.split("__").slice(-1)[0] : name;
-		// Which star on the bus this lands in: the touched folder, or a pseudo-folder
+		return { tool: short, kind, target: target.slice(0, 60) };
+	},
+
+	/* Work out which repo, and which folder inside it, an action belongs to.
+	 * Files resolve to their nearest git repo. Shell commands use the directory of a
+	 * leading "cd", or the shell's tracked directory (it persists between commands).
+	 * Anything without a repo of its own lands on the repo worked in most recently. */
+	locate (name, input, st) {
+		const d = this.describeTool(name, input);
+		let loc = null;
+		let folderAt = null;
 		const file = input.file_path || input.notebook_path;
-		const group = file ? this.folderOf(file, cwd)
-			: input.path ? (path.relative(cwd || "", String(input.path)) || ".")
-				: kind === "exec" ? "$ shell"
-					: kind === "net" ? "web"
-						: kind === "agent" ? "agents" : short;
-		return { tool: short, kind, target: target.slice(0, 60), group };
+		if (file) {
+			loc = path.dirname(String(file));
+			folderAt = loc;
+		} else if (input.path && d.kind === "read") {
+			loc = path.resolve(st.shellDir, String(input.path));
+			try {
+				if (fs.statSync(loc).isFile()) loc = path.dirname(loc);
+			} catch (e) { /* gone or unreadable: treat as a folder */ }
+			folderAt = loc;
+		} else if (d.kind === "exec" && input.command) {
+			const cd = this.leadingCd(String(input.command), st.shellDir);
+			loc = cd || st.shellDir;
+			// The shell keeps its directory between commands, but Claude Code resets it
+			// to the project dir when a command leaves the project
+			if (cd) st.shellDir = !st.cwd || !path.relative(st.cwd, cd).startsWith("..") ? cd : st.cwd;
+		}
+		const own = this.repoRootOf(loc);
+		if (own) st.lastRepo = own;
+		const repo = own || st.lastRepo || st.cwd || "";
+		const group = folderAt ? this.folderIn(folderAt, own)
+			: d.kind === "exec" ? "$ shell"
+				: d.kind === "net" ? "web"
+					: d.kind === "agent" ? "agents" : d.tool;
+		return { ...d, repo, repoName: this.repoName(repo), group };
 	},
 
 	parseTranscript (file, max, cwd = null) {
 		const uses = [];
 		const done = new Set();
 		let model = null;
+		const st = { cwd, shellDir: cwd || os.homedir(), lastRepo: this.repoRootOf(cwd) };
 		for (const line of this.tailLines(file)) {
 			if (!line) continue;
 			let e;
@@ -215,7 +277,7 @@ module.exports = NodeHelper.create({
 				if (msg.model) model = msg.model;
 				for (const c of msg.content) {
 					if (c.type === "tool_use") {
-						uses.push({ id: c.id, ts: Date.parse(e.timestamp) || 0, ...this.describeTool(c.name, c.input, cwd) });
+						uses.push({ id: c.id, ts: Date.parse(e.timestamp) || 0, ...this.locate(c.name, c.input || {}, st) });
 					}
 				}
 			} else if (msg.role === "user") {
@@ -224,17 +286,17 @@ module.exports = NodeHelper.create({
 		}
 		const last = uses[uses.length - 1];
 		const current = last && !done.has(last.id) ? { ...last, running: true } : null;
-		// newest first, merge repeats of the same target
+		// newest first, merge repeats of the same target in the same place
 		const activity = [];
 		const seen = new Map();
 		for (let i = uses.length - 1; i >= 0 && activity.length < max; i--) {
 			const u = uses[i];
-			const key = `${u.kind}:${u.target || u.tool}`;
+			const key = `${u.repo}|${u.group}|${u.kind}:${u.target || u.tool}`;
 			if (seen.has(key)) {
 				seen.get(key).count++;
 				continue;
 			}
-			const item = { tool: u.tool, kind: u.kind, target: u.target, group: u.group, ts: u.ts, count: 1, running: !!(current && current.id === u.id) };
+			const item = { tool: u.tool, kind: u.kind, target: u.target, repo: u.repo, repoName: u.repoName, group: u.group, ts: u.ts, count: 1, running: !!(current && current.id === u.id) };
 			seen.set(key, item);
 			activity.push(item);
 		}

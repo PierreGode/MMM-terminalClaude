@@ -11,11 +11,12 @@ Module.register("MMM-terminalClaude", {
 		alwaysShow: false, // debug: never hide
 		showIdleSessions: false, // star layout: also draw idle/waiting sessions as dim nodes
 		maxActivity: 14, // recent distinct actions per busy session
+		maxRepos: 3, // hybrid: buses (repos) drawn at once
 		maxGroups: 6, // hybrid: folder stars per bus
 		maxLeaves: 4, // hybrid: files per folder star
 		maxSubagents: 4,
 		subagentActiveMs: 60 * 1000,
-		layout: "hybrid", // "hybrid" (bus of sessions, star per busy session) or "star"
+		layout: "hybrid", // "hybrid" (repo bus with a star per folder) or "star"
 		mapWidth: 560,
 		mapHeight: 340,
 		fadeSpeed: 1000
@@ -106,7 +107,7 @@ Module.register("MMM-terminalClaude", {
 		if (!this.el || !this.tc) return;
 		const sessions = this.tc.sessions.filter((s) => this.config.showIdleSessions || s.status === "busy" || s.subagents.length);
 		// Only rebuild the SVG when the structure changes, so CSS animations don't restart
-		const sig = JSON.stringify(sessions.map((s) => [s.id, s.status, s.activity.map((a) => [a.kind, a.target, a.tool, a.running, a.count]), s.subagents.map((a) => [a.id, a.current && a.current.target])]));
+		const sig = JSON.stringify(sessions.map((s) => [s.id, s.status, s.activity.map((a) => [a.repo, a.group, a.kind, a.target, a.tool, a.running, a.count]), s.subagents.map((a) => [a.id, a.current && a.current.target])]));
 		if (sig === this.mapSig) return;
 		this.mapSig = sig;
 		this.el.map.innerHTML = this.config.layout === "star" ? this.renderStar(sessions) : this.renderHybrid(sessions);
@@ -119,7 +120,7 @@ Module.register("MMM-terminalClaude", {
 	children (s) {
 		return [
 			...s.activity.map((a) => ({ ...a, sub: false })),
-			...s.subagents.map((a) => ({ sub: true, kind: "agent", tool: a.type, target: a.description || (a.current && a.current.target), running: true }))
+			...s.subagents.map((a) => ({ sub: true, kind: "agent", tool: a.type, target: a.description || (a.current && a.current.target), running: true, repo: s.repo, repoName: s.repoName, group: "agents" }))
 		];
 	},
 
@@ -138,42 +139,68 @@ Module.register("MMM-terminalClaude", {
 		nodes.push(`<g class="tc-kid ${k.running ? "tc-running" : ""}" style="opacity:${op}">${k.running ? `<circle class="tc-ping" cx="${kx}" cy="${ky}" r="8" style="stroke:${col}"/>` : ""}${shape}<text x="${kx + dx}" y="${ky + dy}" text-anchor="${anchor}">${this.esc(label)}</text></g>`);
 	},
 
-	/* Hybrid: the repo sits at the far left of a bus; every folder touched taps off the
-	 * bus (alternating above/below) and is the hub of a star of the files touched in it.
-	 * Commands, web lookups and subagents get their own pseudo-folders. */
+	textWidth (text, font) {
+		this.measureCtx = this.measureCtx || document.createElement("canvas").getContext("2d");
+		this.measureCtx.font = font;
+		return this.measureCtx.measureText(text).width;
+	},
+
+	/* Hybrid: one bus per repo being worked on. The repo is the orange pill at the far
+	 * left; every folder touched taps off the bus (alternating above/below) and is the hub
+	 * of a star of the files touched in it. Commands, web lookups and subagents get their
+	 * own pseudo-folders. */
 	renderHybrid (sessions) {
 		const W = this.config.mapWidth;
 		const H = this.config.mapHeight;
-		const busy = sessions.filter((s) => this.isBusy(s));
-		const rowH = H / Math.max(1, busy.length);
 		const edges = [];
 		const nodes = [];
 		const anim = [];
 
-		busy.forEach((s, row) => {
-			const busY = rowH * row + rowH / 2;
-			const repoX = 24;
-			const busEnd = W - 8;
-			edges.push(`<line class="tc-bus" x1="${repoX}" y1="${busY}" x2="${busEnd}" y2="${busY}"/>`);
-			edges.push(`<line class="tc-bus" x1="${busEnd}" y1="${busY - 6}" x2="${busEnd}" y2="${busY + 6}"/>`);
-			nodes.push(`<g class="tc-sess tc-busy tc-repo"><circle cx="${repoX}" cy="${busY}" r="14"/><text x="${repoX - 14}" y="${busY - 24}" text-anchor="start">${this.esc(this.trunc(s.project, 24))}</text></g>`);
+		// Gather activity per repo across all busy sessions, most recently worked-on repo first
+		const repos = [];
+		const byRepo = new Map();
+		for (const s of sessions.filter((x) => this.isBusy(x))) {
+			for (const k of this.children(s)) {
+				const key = k.repo || s.repo;
+				if (!byRepo.has(key)) {
+					const r = { name: k.repoName || s.repoName, kids: [] };
+					byRepo.set(key, r);
+					repos.push(r);
+				}
+				byRepo.get(key).kids.push(k);
+			}
+		}
+		const rows = repos.slice(0, this.config.maxRepos);
+		const rowH = H / Math.max(1, rows.length);
 
-			// Group activity by folder, most recently touched first
+		rows.forEach((r, row) => {
+			const busY = rowH * row + rowH / 2;
+			const name = this.trunc(r.name, 22);
+			const pillW = Math.ceil(this.textWidth(name, "bold 14px 'Roboto Condensed', sans-serif")) + 26;
+			const pillX = 2;
+			const busX = pillX + pillW;
+			const busEnd = W - 8;
+			const live = r.kids.some((k) => k.running);
+			edges.push(`<line class="tc-bus" x1="${busX}" y1="${busY}" x2="${busEnd}" y2="${busY}"/>`);
+			edges.push(`<line class="tc-bus" x1="${busEnd}" y1="${busY - 6}" x2="${busEnd}" y2="${busY + 6}"/>`);
+			nodes.push(`<g class="tc-repo${live ? " tc-repo-live" : ""}"><rect x="${pillX}" y="${busY - 15}" width="${pillW}" height="30" rx="15"/><text x="${pillX + pillW / 2}" y="${busY + 5}" text-anchor="middle">${this.esc(name)}</text></g>`);
+
+			// Group by folder, most recently touched first
 			const groups = [];
 			const byName = new Map();
-			for (const k of this.children(s)) {
-				const name = k.sub ? "agents" : (k.group || k.tool);
-				if (!byName.has(name)) {
-					const g = { name, kids: [] };
-					byName.set(name, g);
+			for (const k of r.kids) {
+				const gname = k.group || k.tool;
+				if (!byName.has(gname)) {
+					const g = { name: gname, kids: [] };
+					byName.set(gname, g);
 					groups.push(g);
 				}
-				byName.get(name).kids.push(k);
+				byName.get(gname).kids.push(k);
 			}
 			const G = Math.min(groups.length, this.config.maxGroups);
 			const tap = Math.min(rowH * 0.17, 48);
 			const leafR = Math.max(26, Math.min(rowH / 2 - tap - 24, 58));
-			const gx0 = repoX + 64;
+			const gx0 = busX + 40;
 			const gw = (busEnd - 40 - gx0) / Math.max(1, G);
 
 			groups.slice(0, G).forEach((g, gi) => {
@@ -184,7 +211,7 @@ Module.register("MMM-terminalClaude", {
 				const running = g.kids.some((k) => k.running);
 				const col = this.KIND_COLORS[g.kids[0].kind] || this.KIND_COLORS.other;
 				edges.push(`<line class="tc-edge${running ? " tc-flow" : ""}" style="stroke:${col}" x1="${hx}" y1="${busY}" x2="${hx}" y2="${hy}"/>`);
-				if (running) anim.push(`<circle class="tc-packet" r="3"><animateMotion dur="1.8s" repeatCount="indefinite" path="M${repoX},${busY} H${hx} V${hy}"/></circle>`);
+				if (running) anim.push(`<circle class="tc-packet" r="3"><animateMotion dur="1.8s" repeatCount="indefinite" path="M${busX},${busY} H${hx} V${hy}"/></circle>`);
 
 				const leaves = g.kids.slice(0, this.config.maxLeaves);
 				const extra = g.kids.length - leaves.length;
@@ -195,7 +222,7 @@ Module.register("MMM-terminalClaude", {
 					const lx = hx + Math.cos(ka) * leafR;
 					const ly = hy + Math.sin(ka) * leafR;
 					const lc = this.KIND_COLORS[k.kind] || this.KIND_COLORS.other;
-					const op = k.running ? 1 : Math.max(0.45, 1 - groups.indexOf(g) * 0.12);
+					const op = k.running ? 1 : Math.max(0.45, 1 - gi * 0.12);
 					const anchor = Math.cos(ka) > 0.3 ? "start" : Math.cos(ka) < -0.3 ? "end" : "middle";
 					const dx = anchor === "start" ? 8 : anchor === "end" ? -8 : 0;
 					const dy = anchor === "middle" ? (up ? -10 : 18) : 4;
@@ -257,7 +284,7 @@ Module.register("MMM-terminalClaude", {
 			const anchor = kids.length ? "middle" : Math.cos(a) > 0.25 ? "start" : Math.cos(a) < -0.25 ? "end" : "middle";
 			const tx = sx + (anchor === "start" ? 12 : anchor === "end" ? -12 : 0);
 			const ty = anchor === "middle" ? sy - 13 : sy + 4;
-			nodes.push(`<g class="tc-sess tc-${this.esc(s.status)}${busy ? " tc-busy" : ""}"><circle cx="${sx}" cy="${sy}" r="${busy ? 9 : 6}"/><text x="${tx}" y="${ty}" text-anchor="${anchor}">${this.esc(this.trunc(s.project, 18))}</text></g>`);
+			nodes.push(`<g class="tc-sess tc-${this.esc(s.status)}${busy ? " tc-busy" : ""}"><circle cx="${sx}" cy="${sy}" r="${busy ? 9 : 6}"/><text x="${tx}" y="${ty}" text-anchor="${anchor}">${this.esc(this.trunc(s.repoName || s.project, 18))}</text></g>`);
 		});
 
 		return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${edges.join("")}${nodes.join("")}</svg>`;
@@ -270,7 +297,8 @@ Module.register("MMM-terminalClaude", {
 			const c = s.current || s.activity[0];
 			const what = c ? `<span style="color:${this.KIND_COLORS[c.kind]}">${this.esc(c.tool)}</span> ${this.esc(this.trunc(c.target, 46))}` : "thinking…";
 			const subs = s.subagents.length ? ` <span class="tc-dim">+${s.subagents.length} agent${s.subagents.length > 1 ? "s" : ""}</span>` : "";
-			return `<div class="tc-now-row"><span class="tc-dot"></span><b>${this.esc(s.name)}</b> ${what}${subs}</div>`;
+			const repo = (c && c.repoName) || s.repoName || s.name;
+			return `<div class="tc-now-row"><span class="tc-dot"></span><b>${this.esc(repo)}</b> ${what}${subs}</div>`;
 		}).join("");
 	},
 
